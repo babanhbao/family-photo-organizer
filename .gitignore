@@ -1,0 +1,76 @@
+# -------------------------
+# Python
+# -------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+pip-wheel-metadata/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual envs
+.env
+.venv
+env/
+venv/
+ENV/
+
+# -------------------------
+# IDE / OS
+# -------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# -------------------------
+# Project-specific outputs
+# -------------------------
+# Trained database
+db/
+*.pkl
+
+# Uploaded runs + thumbnails + zips (Flask app tmp)
+family_photo_organizer_uploads/
+*_uploads/
+_thumb*/           
+
+# If you keep uploads under system temp, ignore any local tmp folder you might create
+tmp/
+temp/
+*.tmp
+
+# Training images (usually large / private)
+train/
+
+# Results folders produced during batch (copied images)
+family/
+non_family/
+
+# Any exported bundles
+*.zip
+
+# Logs
+*.log
+
+# -------------------------
+# Jupyter (if any)
+# -------------------------
+.ipynb_checkpoints/
+
+# -------------------------
+# macOS local cache artifacts
+# -------------------------
+.Spotlight-V100
+.Trashes

@@ -1,0 +1,221 @@
+Family Photo Detector (Auto-Train)
+
+A local-only Python tool that automatically learns who your family members are from a single folder of mixed family photos, then sorts any photo collection into:
+
+family/
+
+non-family/
+
+No manual labeling. No cloud. No per-person folders.
+
+Key Idea
+
+Instead of organizing photos by person name, this tool:
+
+Detects all faces in train/family/
+
+Clusters faces using face embeddings
+
+Assumes faces that appear most often = family members
+
+Stores cluster centroids as the “family model”
+
+Uses that model to classify new photos
+
+This works well because:
+
+Family members appear many times
+
+Friends / strangers appear rarely
+
+Folder Structure (Fixed Convention)
+project/
+├── family_photo_detector.py
+├── train/
+│   └── family/          ← put ALL photos containing family members here
+├── db/
+│   └── family_db.pkl    ← auto-generated (do not edit)
+
+
+You do not need to:
+
+Create subfolders per person
+
+Specify training paths in CLI
+
+Specify DB path in CLI
+
+Installation
+Python
+
+Python 3.9+ recommended.
+
+Dependencies
+pip install face_recognition opencv-python numpy scikit-learn
+
+
+⚠️ face_recognition depends on dlib.
+If installation fails, search for:
+
+“install dlib macOS arm64”
+
+“install dlib windows visual studio”
+
+(Ask me if you want OS-specific instructions.)
+
+Commands
+
+Only 3 commands exist:
+
+train
+check
+batch
+
+1️⃣ Train (Auto)
+
+Train from ./train/family/ using face clustering.
+
+python family_photo_detector.py train
+
+
+Optional tuning (usually not needed):
+
+python family_photo_detector.py train \
+  --eps 0.45 \
+  --min-cluster-size 15 \
+  --top-k 10
+
+
+What happens
+
+All faces are extracted
+
+DBSCAN clusters them
+
+Top-K largest clusters become “family members”
+
+Model saved to db/family_db.pkl
+
+2️⃣ Check a Single Image
+python family_photo_detector.py check --image path/to/photo.jpg
+
+
+Example output:
+
+{
+  "family": true,
+  "faces": 3,
+  "recognized": 2
+}
+
+
+Decision logic (default):
+
+If ≥1 known family face → family photo
+
+You can change logic:
+
+--decision any_known      # default
+--decision majority_known
+--decision all_known
+
+3️⃣ Batch Sort a Folder
+
+Sort all images in a folder:
+
+python family_photo_detector.py batch --folder photos
+
+
+Result:
+
+photos/
+├── family/
+│   ├── img1.jpg
+│   └── img3.png
+└── non-family/
+    └── img2.jpg
+
+
+Preview without moving files:
+
+python family_photo_detector.py batch --folder photos --dry-run
+
+How “Family Photo” Is Defined
+
+Per image:
+
+Detect faces
+
+Match against family centroids
+
+Apply decision rule:
+
+Rule	Meaning
+any_known	≥1 face is family
+majority_known	>50% faces are family
+all_known	everyone must be family
+
+Default: any_known (best for phone dumps)
+
+Tuning Guide (Important)
+If no clusters found during training
+--eps 0.50
+--min-cluster-size 8
+
+If friends get classified as family
+--eps 0.40
+--top-k 5
+--min-cluster-size 20
+
+If dataset has many group photos
+--min-cluster-size 25
+
+Limitations (Be Honest)
+
+Assumes family faces appear more frequently than others
+
+Children growing fast may form multiple clusters
+
+Extreme angles / masks reduce accuracy
+
+Not a replacement for law-enforcement grade face ID
+
+For personal photo organization → very effective
+
+Privacy
+
+100% local
+
+No cloud calls
+
+No images uploaded
+
+Only numeric face embeddings are stored
+
+Recommended Workflow (Real World)
+
+Dump years of family photos into train/family/
+
+Run train
+
+Spot-check with check
+
+Run batch on your entire photo archive
+
+Enjoy clean albums 😄
+
+Future Improvements (Optional)
+
+Export face-crop previews per cluster for manual approval
+
+Merge child clusters automatically
+
+GPU acceleration
+
+Copy instead of move
+
+Video frame sampling
+
+License
+
+MIT (use, modify, break, fix, repeat)
