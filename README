@@ -1,5 +1,38 @@
 Family Photo Detector (Auto-Train)
 
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              BROWSER                                        │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                     │
+│  │ Upload Form │───▶│   SSE       │◀───│  Grid UI    │                     │
+│  └─────────────┘    │ EventSource │    └─────────────┘                     │
+└────────┬────────────────────┬───────────────────────────────────────────────┘
+         │ POST /batch_stream │ GET /batch_events/<job_id>
+         ▼                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            FLASK SERVER                                     │
+│                                                                             │
+│  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐                │
+│  │ batch_stream │────▶│  BatchJob    │────▶│ _batch_      │                │
+│  │   (route)    │     │  (dataclass) │     │  processor   │                │
+│  └──────────────┘     └──────────────┘     │  (thread)    │                │
+│                                            └───────┬──────┘                │
+│                                                    │                        │
+│                                            ┌───────▼──────┐                │
+│                                            │ ThreadPool   │                │
+│                                            │ Executor     │                │
+│                                            │ (6 workers)  │                │
+│                                            └───────┬──────┘                │
+│                                                    │                        │
+│                              ┌─────────────────────┼─────────────────────┐ │
+│                              ▼                     ▼                     ▼ │
+│                     ┌─────────────┐       ┌─────────────┐       ┌────────┐│
+│                     │ _process_   │       │ _process_   │  ...  │ _proc_ ││
+│                     │ single_image│       │ single_image│       │ single ││
+│                     └─────────────┘       └─────────────┘       └────────┘│
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+
 A local-only Python tool that automatically learns who your family members are from a single folder of mixed family photos, then sorts any photo collection into:
 
 family/
