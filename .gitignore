@@ -54,6 +54,8 @@ temp/
 # Training images (usually large / private)
 train/
 
+trained_faces/
+
 # Results folders produced during batch (copied images)
 family/
 non_family/
