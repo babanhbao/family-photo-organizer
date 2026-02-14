@@ -1,254 +1,278 @@
-Family Photo Detector (Auto-Train)
+# Family Photo Organizer (YOLOv8)
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              BROWSER                                        │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                     │
-│  │ Upload Form │───▶│   SSE       │◀───│  Grid UI    │                     │
-│  └─────────────┘    │ EventSource │    └─────────────┘                     │
-└────────┬────────────────────┬───────────────────────────────────────────────┘
-         │ POST /batch_stream │ GET /batch_events/<job_id>
-         ▼                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            FLASK SERVER                                     │
-│                                                                             │
-│  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐                │
-│  │ batch_stream │────▶│  BatchJob    │────▶│ _batch_      │                │
-│  │   (route)    │     │  (dataclass) │     │  processor   │                │
-│  └──────────────┘     └──────────────┘     │  (thread)    │                │
-│                                            └───────┬──────┘                │
-│                                                    │                        │
-│                                            ┌───────▼──────┐                │
-│                                            │ ThreadPool   │                │
-│                                            │ Executor     │                │
-│                                            │ (6 workers)  │                │
-│                                            └───────┬──────┘                │
-│                                                    │                        │
-│                              ┌─────────────────────┼─────────────────────┐ │
-│                              ▼                     ▼                     ▼ │
-│                     ┌─────────────┐       ┌─────────────┐       ┌────────┐│
-│                     │ _process_   │       │ _process_   │  ...  │ _proc_ ││
-│                     │ single_image│       │ single_image│       │ single ││
-│                     └─────────────┘       └─────────────┘       └────────┘│
-└─────────────────────────────────────────────────────────────────────────────┘
+Local-first family photo classifier with:
+- Local model training (`train/family` -> `db/family_db.pkl`)
+- Cloud-style model training in UI (multiple named models)
+- Web UI + Electron desktop app + DMG packaging
 
+---
 
+## 1) What This App Does
 
-A local-only Python tool that automatically learns who your family members are from a single folder of mixed family photos, then sorts any photo collection into:
+Given a folder of photos, it classifies each image into:
+- `family`
+- `non_family`
 
-family/
+Detection pipeline:
+1. Detect faces with YOLOv8-face
+2. Match detected faces to trained face embeddings
+3. Mark image as family if at least one face is recognized (default behavior)
 
-non-family/
+---
 
-No manual labeling. No cloud. No per-person folders.
+## 2) Main Modes
 
-Key Idea
+### Local mode
+- Uses local DB (`db/family_db.pkl`) and local face crops (`trained_faces/`)
+- Optional Edge model support
 
-Instead of organizing photos by person name, this tool:
+### Cloud mode (default in UI)
+- You can train multiple named models under `cloud_models/`
+- You can:
+  - Train a brand-new model
+  - Continue training an existing model with new photos
 
-Detects all faces in train/family/
+---
 
-Clusters faces using face embeddings
+## 3) Project Structure
 
-Assumes faces that appear most often = family members
-
-Stores cluster centroids as the “family model”
-
-Uses that model to classify new photos
-
-This works well because:
-
-Family members appear many times
-
-Friends / strangers appear rarely
-
-Folder Structure (Fixed Convention)
-project/
-├── family_photo_detector.py
+```text
+family_photo_organizer/
+├── app_yolo.py                       # Web app (Flask + UI)
+├── family_photo_detector_yolo.py     # Training/classification core + CLI
 ├── train/
-│   └── family/          ← put ALL photos containing family members here
-├── db/
-│   └── family_db.pkl    ← auto-generated (do not edit)
+│   └── family/                       # Local training photos
+├── db/                               # Local DB output
+├── trained_faces/                    # Local face crops output
+├── cloud_models/                     # Cloud-mode named models
+├── results/                          # Downloadable result zip files
+├── runtime/uploads/                  # Temporary run/extract folders (auto-clean)
+├── electron/main.js                  # Desktop shell
+├── scripts/build_dmg.sh              # DMG build helper
+└── package.json                      # Electron build scripts
+```
 
+---
 
-You do not need to:
+## 4) Requirements
 
-Create subfolders per person
+- Python 3.10+ (3.11 recommended)
+- macOS/Linux for web mode
+- macOS + Node.js/npm for desktop DMG build
 
-Specify training paths in CLI
+Install Python deps (inside venv):
 
-Specify DB path in CLI
+```bash
+cd /Users/kevinvo/Documents/family_photo_organizer
+python3 -m venv env
+source env/bin/activate
+pip install --upgrade pip
+pip install flask numpy opencv-python face_recognition scikit-learn ultralytics
+```
 
-Installation
-Python
+Notes:
+- `face_recognition` depends on `dlib`.
+- If `yolov8n-face.pt` is missing, the app can auto-download it (network required).
 
-Python 3.9+ recommended.
+---
 
-Dependencies
-pip install face_recognition opencv-python numpy scikit-learn
+## 5) Run Web App
 
+```bash
+cd /Users/kevinvo/Documents/family_photo_organizer
+source env/bin/activate
+python app_yolo.py
+```
 
-⚠️ face_recognition depends on dlib.
-If installation fails, search for:
+Open:
+- `http://127.0.0.1:5050`
 
-“install dlib macOS arm64”
+Optional env vars:
+- `APP_HOST` (default `127.0.0.1`)
+- `APP_PORT` (default `5050`)
+- `FPO_APP_DATA_DIR` (default project root when running directly)
+- `PROCESS_WORKERS` (default `4`)
 
-“install dlib windows visual studio”
+---
 
-(Ask me if you want OS-specific instructions.)
+## 6) Local Training (CLI)
 
-Commands
+Put family photos in:
+- `train/family/`
 
-Only 3 commands exist:
+Train:
 
-train
-check
-batch
+```bash
+cd /Users/kevinvo/Documents/family_photo_organizer
+source env/bin/activate
+python family_photo_detector_yolo.py train
+```
 
-1️⃣ Train (Auto)
+Outputs:
+- `db/family_db.pkl`
+- `trained_faces/`
 
-Train from ./train/family/ using face clustering.
+Optional edge model:
 
-python family_photo_detector.py train
+```bash
+python family_photo_detector_yolo.py train-edge
+```
 
+Check one image:
 
-Optional tuning (usually not needed):
+```bash
+python family_photo_detector_yolo.py check --image /absolute/path/to/photo.jpg
+```
 
-python family_photo_detector.py train \
-  --eps 0.45 \
-  --min-cluster-size 15 \
-  --top-k 10
+Batch organize a folder:
 
+```bash
+python family_photo_detector_yolo.py batch --folder /absolute/path/to/photos
+```
 
-What happens
+---
 
-All faces are extracted
+## 7) Cloud Training in UI
 
-DBSCAN clusters them
+Cloud mode is default in the web/desktop UI.
 
-Top-K largest clusters become “family members”
+### Train new model
+1. In `Cloud Model Training`, leave `Train as new model`
+2. Enter `Model name`
+3. `Browse Train Folder...`
+4. Set `Number of persons`
+5. Click `Extract Faces`
+6. Drag/drop faces between people or `Not a Face`
+7. Click `Train Model`
 
-Model saved to db/family_db.pkl
+### Continue training existing model
+1. In `Cloud Model Training`, choose `Continue: <existing_model>`
+2. Choose one of:
+   - Leave `Model name` empty -> update same model
+   - Enter new `Model name` -> create a new model based on old + new faces
+3. Browse new training folder
+4. Extract faces, adjust assignments, then train
 
-2️⃣ Check a Single Image
-python family_photo_detector.py check --image path/to/photo.jpg
+How continue works:
+- Existing model faces are loaded
+- New extracted faces are merged
+- DB is rebuilt with combined data
 
+---
 
-Example output:
+## 8) Detection in UI
 
-{
-  "family": true,
-  "faces": 3,
-  "recognized": 2
-}
+Section: `Use Trained Model to Detect Family Photos`
 
+Options:
+- `YOLO Conf` slider
+- `Similarity` slider
+- Local mode: optional `Use Edge Model`
+- Cloud mode: choose trained cloud model
 
-Decision logic (default):
+Flow:
+1. Browse folder
+2. Run
+3. Download ZIP from link shown when done
 
-If ≥1 known family face → family photo
+Side panel:
+- Shows per-image decision steps
+- Shows detected face comparisons (train thumbnail vs query face thumbnail)
 
-You can change logic:
+---
 
---decision any_known      # default
---decision majority_known
---decision all_known
+## 9) Cleanup and Storage
 
-3️⃣ Batch Sort a Folder
+### Reset button
+`Reset + Cleanup` in Cloud section will remove:
+- All `cloud_models/`
+- Runtime temp folders
+- Extract sessions
+- Saved `results_*.zip`
 
-Sort all images in a folder:
+### Automatic cleanup
+The backend also auto-cleans:
+- Finished runtime jobs after TTL
+- Old result zips by age/count limits
+- Legacy temp folders from old versions in `/tmp`
 
-python family_photo_detector.py batch --folder photos
+Related env vars:
+- `RUN_CACHE_TTL_S` (default `300`)
+- `RESULTS_RETENTION_S` (default `604800` = 7 days)
+- `RESULTS_KEEP_MAX` (default `40`)
 
+---
 
-Result:
+## 10) Desktop App (Electron)
 
-photos/
-├── family/
-│   ├── img1.jpg
-│   └── img3.png
-└── non-family/
-    └── img2.jpg
+### Run desktop in dev
 
+```bash
+cd /Users/kevinvo/Documents/family_photo_organizer
+npm install
+npm run electron:dev
+```
 
-Preview without moving files:
+### Build DMG
 
-python family_photo_detector.py batch --folder photos --dry-run
+One command:
 
-How “Family Photo” Is Defined
+```bash
+cd /Users/kevinvo/Documents/family_photo_organizer
+bash ./scripts/build_dmg.sh
+```
 
-Per image:
+Or manual:
 
-Detect faces
+```bash
+npm run build:dmg
+```
 
-Match against family centroids
+Output:
+- `release/FamilyPhotoOrganizer-<version>-<arch>.dmg`
 
-Apply decision rule:
+### Install
+1. Open DMG
+2. Drag app to `/Applications`
+3. Launch from `/Applications`
 
-Rule	Meaning
-any_known	≥1 face is family
-majority_known	>50% faces are family
-all_known	everyone must be family
+First launch can take ~30-60s while models load. Desktop now shows loading screen during startup.
 
-Default: any_known (best for phone dumps)
+---
 
-Tuning Guide (Important)
-If no clusters found during training
---eps 0.50
---min-cluster-size 8
+## 11) Troubleshooting
 
-If friends get classified as family
---eps 0.40
---top-k 5
---min-cluster-size 20
+### `ERR_CONNECTION_REFUSED` at startup
+- Usually backend is still loading or app instance is stale.
+- Use latest DMG and run from `/Applications`.
+- Check startup log:
+  - `~/Library/Application Support/Family Photo Organizer/startup.log`
 
-If dataset has many group photos
---min-cluster-size 25
+### White page
+- Quit all old app instances
+- Reinstall latest DMG
+- Relaunch from `/Applications`
 
-Limitations (Be Honest)
+### Build fails at PyInstaller cache permission
+- Run build outside restricted sandbox (normal terminal)
+- Re-run:
+  - `npm run build:dmg`
 
-Assumes family faces appear more frequently than others
+---
 
-Children growing fast may form multiple clusters
+## 12) Legacy Temp Cleanup Script
 
-Extreme angles / masks reduce accuracy
+If you need manual cleanup for older temp layouts:
 
-Not a replacement for law-enforcement grade face ID
+```bash
+cd /Users/kevinvo/Documents/family_photo_organizer
+./clean_up.sh --dry-run
+./clean_up.sh --yes
+```
 
-For personal photo organization → very effective
+---
 
-Privacy
+## 13) License
 
-100% local
+MIT
 
-No cloud calls
-
-No images uploaded
-
-Only numeric face embeddings are stored
-
-Recommended Workflow (Real World)
-
-Dump years of family photos into train/family/
-
-Run train
-
-Spot-check with check
-
-Run batch on your entire photo archive
-
-Enjoy clean albums 😄
-
-Future Improvements (Optional)
-
-Export face-crop previews per cluster for manual approval
-
-Merge child clusters automatically
-
-GPU acceleration
-
-Copy instead of move
-
-Video frame sampling
-
-License
-
-MIT (use, modify, break, fix, repeat)

@@ -67,6 +67,18 @@ non_family/
 *.log
 
 # -------------------------
+# Desktop packaging (Electron + PyInstaller)
+# -------------------------
+node_modules/
+release/
+electron/backend/
+electron/seed/db/
+electron/seed/trained_faces/
+electron/seed/*.pt
+.pyi-build/
+family-photo-server.spec
+
+# -------------------------
 # Jupyter (if any)
 # -------------------------
 .ipynb_checkpoints/

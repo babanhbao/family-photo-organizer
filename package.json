@@ -1,0 +1,56 @@
+{
+  "name": "family-photo-organizer-desktop",
+  "version": "0.1.0",
+  "description": "Desktop wrapper for Family Photo Organizer",
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "prepare:seed": "bash ./scripts/prepare_desktop_seed.sh",
+    "bundle:backend": "./env/bin/pyinstaller app_yolo.py --noconfirm --clean --onefile --name family-photo-server --distpath electron/backend --workpath .pyi-build --specpath . --collect-data face_recognition_models --collect-data ultralytics --collect-data sklearn --hidden-import sklearn.utils._cython_blas --hidden-import sklearn.neighbors._partition_nodes",
+    "electron:dev": "electron .",
+    "build:dmg": "npm run prepare:seed && npm run bundle:backend && electron-builder --mac dmg",
+    "build:dmg:universal": "npm run prepare:seed && npm run bundle:backend && electron-builder --mac dmg --universal"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.kevinvo.familyphotoorganizer",
+    "productName": "Family Photo Organizer",
+    "asar": true,
+    "directories": {
+      "output": "release",
+      "buildResources": "electron/resources"
+    },
+    "files": [
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "electron/backend/family-photo-server",
+        "to": "backend/family-photo-server"
+      },
+      {
+        "from": "electron/seed",
+        "to": "seed"
+      }
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.photography"
+    },
+    "dmg": {
+      "artifactName": "FamilyPhotoOrganizer-${version}-${arch}.${ext}"
+    }
+  }
+}

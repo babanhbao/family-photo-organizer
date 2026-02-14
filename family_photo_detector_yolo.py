@@ -152,13 +152,16 @@ class ClassifyResult:
     fast_passed: bool = False
     confidences: List[float] = field(default_factory=list)  # YOLO conf (keep for debug)
     match_scores: List[float] = field(default_factory=list)  # Similarity với DB (0-1)
+    face_locations: List[Tuple[int, int, int, int]] = field(default_factory=list)
+    resized_shape: Tuple[int, int] = (0, 0)  # (h, w) used for detection/encoding
     
     def to_dict(self):
         return {
             "family": self.family, "faces": self.faces, "recognized": self.recognized,
             "matches": self.matches, "mode_used": self.mode_used,
             "fast_passed": self.fast_passed, "confidences": self.confidences,
-            "match_scores": self.match_scores,
+            "match_scores": self.match_scores, "face_locations": self.face_locations,
+            "resized_shape": self.resized_shape,
         }
 
 
@@ -244,17 +247,22 @@ def detect_faces_yolo(rgb: np.ndarray, conf_threshold: float = DEFAULT_CONF,
     return face_locations, confidences
 
 
-def load_db():
-    if not DB_PATH.exists():
-        raise FileNotFoundError(f"DB not found at {DB_PATH}. Run train first.")
-    with open(DB_PATH, "rb") as f:
+def load_db(db_path: Path = DB_PATH, trained_faces_dir: Optional[Path] = None):
+    db_path = Path(db_path)
+    if not db_path.exists():
+        raise FileNotFoundError(f"DB not found at {db_path}. Run train first.")
+    with open(db_path, "rb") as f:
         db = pickle.load(f)
     for k in ("centroids", "names", "thresholds"):
         if k not in db:
             raise ValueError(f"Invalid DB: missing '{k}'")
     db["centroids"] = np.array(db["centroids"], dtype=np.float32)
     db["thresholds"] = np.array(db["thresholds"], dtype=np.float32)
-    _attach_trained_face_index(db)
+    if trained_faces_dir is None:
+        meta = db.get("meta") or {}
+        meta_dir = meta.get("trained_faces_dir")
+        trained_faces_dir = Path(meta_dir) if meta_dir else TRAINED_FACES_DIR
+    _attach_trained_face_index(db, Path(trained_faces_dir))
     return db
 
 
@@ -298,17 +306,17 @@ def _encode_face_crop(path: Path):
         return None
 
 
-def _attach_trained_face_index(db):
+def _attach_trained_face_index(db, trained_faces_dir: Path):
     if "train_faces" in db:
         return
     names = db.get("names") or []
-    if not names or not TRAINED_FACES_DIR.exists():
+    if not names or not trained_faces_dir.exists():
         db["train_faces"] = {}
         return
 
     train_faces = {}
     for cluster_name in names:
-        cluster_dir = TRAINED_FACES_DIR / cluster_name
+        cluster_dir = trained_faces_dir / cluster_name
         if not cluster_dir.exists() or not cluster_dir.is_dir():
             continue
 
@@ -339,14 +347,21 @@ def train_auto(eps=DEFAULT_EPS, min_cluster_size=DEFAULT_MIN_CLUSTER_SIZE, top_k
                min_unique_images=DEFAULT_MIN_UNIQUE_IMAGES, thresh_quantile=DEFAULT_THRESH_QUANTILE,
                thresh_margin=DEFAULT_THRESH_MARGIN, max_tolerance_cap=DEFAULT_MAX_TOLERANCE_CAP,
                num_jitters=DEFAULT_JITTERS_TRAIN, max_faces_per_image=DEFAULT_MAX_FACES_PER_IMAGE,
-               conf_threshold=DEFAULT_CONF, save_faces=True):
-    if not TRAIN_FAMILY_DIR.exists():
-        raise FileNotFoundError(f"Missing folder: {TRAIN_FAMILY_DIR}")
+               conf_threshold=DEFAULT_CONF, save_faces=True,
+               train_family_dir: Path = TRAIN_FAMILY_DIR,
+               db_path: Path = DB_PATH,
+               trained_faces_dir: Path = TRAINED_FACES_DIR):
+    train_family_dir = Path(train_family_dir)
+    db_path = Path(db_path)
+    trained_faces_dir = Path(trained_faces_dir)
 
-    images = list(iter_images(TRAIN_FAMILY_DIR))
+    if not train_family_dir.exists():
+        raise FileNotFoundError(f"Missing folder: {train_family_dir}")
+
+    images = list(iter_images(train_family_dir))
     total_images = len(images)
     if total_images == 0:
-        raise RuntimeError("No images found in train/family")
+        raise RuntimeError(f"No images found in {train_family_dir}")
 
     print(f"[INFO] Training on {total_images} images (YOLO conf >= {conf_threshold})\n")
     _ = get_yolo_model()
@@ -354,10 +369,10 @@ def train_auto(eps=DEFAULT_EPS, min_cluster_size=DEFAULT_MIN_CLUSTER_SIZE, top_k
 
     # Create trained_faces folder if save_faces=True
     if save_faces:
-        if TRAINED_FACES_DIR.exists():
-            shutil.rmtree(TRAINED_FACES_DIR)
-        TRAINED_FACES_DIR.mkdir(parents=True, exist_ok=True)
-        print(f"[INFO] Will save detected faces to: {TRAINED_FACES_DIR}/\n")
+        if trained_faces_dir.exists():
+            shutil.rmtree(trained_faces_dir)
+        trained_faces_dir.mkdir(parents=True, exist_ok=True)
+        print(f"[INFO] Will save detected faces to: {trained_faces_dir}/\n")
 
     embeddings, src_image_ids = [], []
     face_metadata = []  # Store face info for later clustering assignment
@@ -397,7 +412,7 @@ def train_auto(eps=DEFAULT_EPS, min_cluster_size=DEFAULT_MIN_CLUSTER_SIZE, top_k
                     
                     # Save with format: imgname_faceX_confYY.jpg
                     face_filename = f"{img.stem}_face{face_idx}_conf{int(conf*100):02d}.jpg"
-                    cv2.imwrite(str(TRAINED_FACES_DIR / face_filename), face_bgr)
+                    cv2.imwrite(str(trained_faces_dir / face_filename), face_bgr)
                     
                     # Store metadata for cluster assignment later
                     face_metadata.append({
@@ -467,18 +482,18 @@ def train_auto(eps=DEFAULT_EPS, min_cluster_size=DEFAULT_MIN_CLUSTER_SIZE, top_k
         
         # Create cluster subfolders
         for cluster_name in names:
-            cluster_dir = TRAINED_FACES_DIR / cluster_name
+            cluster_dir = trained_faces_dir / cluster_name
             cluster_dir.mkdir(exist_ok=True)
         
         # Create NOISE folder for unclustered faces
-        noise_dir = TRAINED_FACES_DIR / "NOISE"
+        noise_dir = trained_faces_dir / "NOISE"
         noise_dir.mkdir(exist_ok=True)
         
         # Move faces to their cluster folders
         moved_count = 0
         for face_info in face_metadata:
             emb_idx = face_info["embedding_idx"]
-            src_file = TRAINED_FACES_DIR / face_info["filename"]
+            src_file = trained_faces_dir / face_info["filename"]
             
             if not src_file.exists():
                 continue
@@ -494,7 +509,7 @@ def train_auto(eps=DEFAULT_EPS, min_cluster_size=DEFAULT_MIN_CLUSTER_SIZE, top_k
             
             # Move to cluster folder or NOISE
             if assigned_cluster:
-                dst_dir = TRAINED_FACES_DIR / assigned_cluster
+                dst_dir = trained_faces_dir / assigned_cluster
             else:
                 dst_dir = noise_dir
             
@@ -504,17 +519,18 @@ def train_auto(eps=DEFAULT_EPS, min_cluster_size=DEFAULT_MIN_CLUSTER_SIZE, top_k
         
         print(f"[INFO] Organized {moved_count} faces into {len(names)} clusters + NOISE")
 
-    DB_DIR.mkdir(exist_ok=True)
-    with open(DB_PATH, "wb") as f:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(db_path, "wb") as f:
         pickle.dump({
             "centroids": np.array(centroids, dtype=np.float32),
             "thresholds": np.array(thresholds, dtype=np.float32),
             "names": names, "sizes": sizes, "unique_images": unique_imgs_list,
             "meta": {"detector": "yolov8", "total_images": total_images,
-                     "total_faces_detected": total_faces_detected, "total_faces_encoded": encoded_faces}
+                     "total_faces_detected": total_faces_detected, "total_faces_encoded": encoded_faces,
+                     "trained_faces_dir": str(trained_faces_dir.resolve())}
         }, f)
 
-    print(f"\n[OK] Training complete. Saved: {DB_PATH}")
+    print(f"\n[OK] Training complete. Saved: {db_path}")
     for nm, sz, uq, thr in zip(names, sizes, unique_imgs_list, thresholds):
         print(f"  {nm}: {sz} faces | {uq} images | thr: {thr:.3f}")
 
@@ -667,17 +683,19 @@ def _detect_and_encode_yolo(rgb, config):
     rgb_resized = resize_rgb_if_needed(rgb, config.max_side)
     locs, confs = detect_faces_yolo(rgb_resized, conf_threshold=config.conf_threshold)
     if not locs:
-        return [], [], []
+        return [], [], [], rgb_resized.shape[:2]
     encs = face_recognition.face_encodings(rgb_resized, locs, num_jitters=config.num_jitters)
-    return locs, encs, confs
+    return locs, encs, confs, rgb_resized.shape[:2]
 
 
 def _classify_with_config(rgb, db, config, decision=DEFAULT_DECISION):
-    locs, encs, confs = _detect_and_encode_yolo(rgb, config)
+    locs, encs, confs, resized_shape = _detect_and_encode_yolo(rgb, config)
     if not locs:
-        return ClassifyResult(False, 0, 0, [], confidences=[], match_scores=[])
+        return ClassifyResult(False, 0, 0, [], confidences=[], match_scores=[],
+                             face_locations=[], resized_shape=resized_shape)
     if not encs:
-        return ClassifyResult(False, len(locs), 0, [], confidences=confs, match_scores=[])
+        return ClassifyResult(False, len(locs), 0, [], confidences=confs, match_scores=[],
+                             face_locations=locs, resized_shape=resized_shape)
     recognized, matches = _match_faces_to_db(encs, db, config.tolerance)
     
     # Tính match_scores: similarity = 1 - distance (capped at 0)
@@ -687,7 +705,9 @@ def _classify_with_config(rgb, db, config, decision=DEFAULT_DECISION):
         _decide_family(recognized, len(encs), decision), 
         len(encs), recognized, matches, 
         confidences=confs[:len(encs)],
-        match_scores=match_scores
+        match_scores=match_scores,
+        face_locations=locs[:len(encs)],
+        resized_shape=resized_shape,
     )
 
 
